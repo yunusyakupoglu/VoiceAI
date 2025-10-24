@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "speaker-id-simple"
+version = "0.1.0"
+description = "Simple speaker identification (MFCC or ECAPA) with CLI and API"
+authors = [{ name = "Your Name" }]
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24,<3",
+  "librosa>=0.10.0",
+  "soundfile>=0.12",
+  "fastapi",
+  "uvicorn",
+]
+
+[project.optional-dependencies]
+ecapa = ["torch>=2.3", "speechbrain>=0.5.16"]
+audio = ["sounddevice>=0.4", "python-multipart"]
+
+[project.scripts]
+speaker-id = "speaker_id.cli:main"
