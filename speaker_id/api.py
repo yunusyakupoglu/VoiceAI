@@ -1,8 +1,10 @@
 from __future__ import annotations
 from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from pathlib import Path
 import numpy as np
+import json
+from typing import AsyncIterator
 
 from .audio import load_audio_mono
 from .preprocess import preprocess_audio, PreprocessConfig
@@ -53,6 +55,77 @@ async def identify(file: UploadFile = File(...), db: str = Form(str(Path.home() 
     return {"name": name, "score": score, "scores": scores}
 
 
+def _sse(data: dict) -> str:
+    return f"data: {json.dumps(data)}\n\n"
+
+
+@app.post("/monitor/enroll")
+async def monitor_enroll(name: str = Form(...), file: UploadFile = File(...), db: str = Form(str(Path.home() / ".speaker_id_db")), sample_rate: int = Form(16000), backend: str = Form("mfcc"), no_preprocess: bool = Form(False)):
+    async def gen() -> AsyncIterator[str]:
+        yield _sse({"step": "received", "filename": file.filename})
+        data = await file.read()
+        yield _sse({"step": "bytes", "n": len(data)})
+        tmp = Path("/tmp/uploaded_audio")
+        tmp.write_bytes(data)
+        yield _sse({"step": "decode_start"})
+        audio, _ = load_audio_mono(tmp, target_sr=sample_rate)
+        yield _sse({"step": "decode_done", "samples": int(audio.size)})
+        if not no_preprocess:
+            yield _sse({"step": "preprocess_start"})
+            audio_p = preprocess_audio(audio, PreprocessConfig(sample_rate=sample_rate))
+            yield _sse({"step": "preprocess_done", "samples": int(audio_p.size)})
+        else:
+            audio_p = audio
+        yield _sse({"step": "embed_start", "backend": backend})
+        extractor = EmbeddingExtractor(EmbeddingConfig(sample_rate=sample_rate, backend=backend))
+        emb = extractor.extract(audio_p)
+        yield _sse({"step": "embed_done", "dim": int(emb.size)})
+        storage = Storage(Path(db))
+        storage.ensure()
+        yield _sse({"step": "store_start", "name": name})
+        storage.add(name, emb)
+        yield _sse({"step": "store_done", "name": name})
+        yield _sse({"step": "complete", "status": "ok", "name": name})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/monitor/identify")
+async def monitor_identify(file: UploadFile = File(...), db: str = Form(str(Path.home() / ".speaker_id_db")), sample_rate: int = Form(16000), backend: str = Form("mfcc"), threshold: float = Form(0.55), top_k: int = Form(3), no_preprocess: bool = Form(False)):
+    async def gen() -> AsyncIterator[str]:
+        yield _sse({"step": "received", "filename": file.filename})
+        data = await file.read()
+        yield _sse({"step": "bytes", "n": len(data)})
+        tmp = Path("/tmp/uploaded_audio")
+        tmp.write_bytes(data)
+        storage = Storage(Path(db))
+        enrollments = storage.all_enrollments()
+        if not enrollments:
+            yield _sse({"step": "error", "error": "no_enrollments"})
+            return
+        yield _sse({"step": "decode_start"})
+        audio, _ = load_audio_mono(tmp, target_sr=sample_rate)
+        yield _sse({"step": "decode_done", "samples": int(audio.size)})
+        if not no_preprocess:
+            yield _sse({"step": "preprocess_start"})
+            audio_p = preprocess_audio(audio, PreprocessConfig(sample_rate=sample_rate))
+            yield _sse({"step": "preprocess_done", "samples": int(audio_p.size)})
+        else:
+            audio_p = audio
+        yield _sse({"step": "embed_start", "backend": backend})
+        extractor = EmbeddingExtractor(EmbeddingConfig(sample_rate=sample_rate, backend=backend))
+        emb = extractor.extract(audio_p)
+        yield _sse({"step": "embed_done", "dim": int(emb.size)})
+        yield _sse({"step": "match_start", "threshold": threshold})
+        model = SimpleSpeakerId(threshold=threshold)
+        name, score, scores = model.identify(emb, enrollments)
+        sorted_scores = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[: top_k or None]
+        yield _sse({"step": "match_done", "name": name, "score": score, "top": sorted_scores})
+        yield _sse({"step": "complete", "status": "ok", "name": name, "score": score})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
 @app.get("/")
 async def index() -> HTMLResponse:
     html = """
@@ -73,6 +146,20 @@ async def index() -> HTMLResponse:
         <button type="submit">Identify</button>
       </form>
       <pre id="identifyOut"></pre>
+      <h2>Monitoring (SSE)</h2>
+      <h3>Enroll (stream)</h3>
+      <form id="enrollMonForm" enctype="multipart/form-data">
+        Name: <input name="name" />
+        File: <input type="file" name="file" />
+        <button type="submit">Enroll with monitoring</button>
+      </form>
+      <pre id="enrollMonOut"></pre>
+      <h3>Identify (stream)</h3>
+      <form id="identifyMonForm" enctype="multipart/form-data">
+        File: <input type="file" name="file" />
+        <button type="submit">Identify with monitoring</button>
+      </form>
+      <pre id="identifyMonOut"></pre>
       <script>
       document.getElementById('enrollForm').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -85,6 +172,27 @@ async def index() -> HTMLResponse:
         const fd = new FormData(e.target);
         const res = await fetch('/identify', { method: 'POST', body: fd });
         document.getElementById('identifyOut').textContent = await res.text();
+      });
+      async function streamToPre(url, form, preId) {
+        const pre = document.getElementById(preId);
+        pre.textContent = '';
+        const res = await fetch(url, { method: 'POST', body: new FormData(form) });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          pre.textContent += decoder.decode(value, { stream: true });
+          pre.scrollTop = pre.scrollHeight;
+        }
+      }
+      document.getElementById('enrollMonForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await streamToPre('/monitor/enroll', e.target, 'enrollMonOut');
+      });
+      document.getElementById('identifyMonForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await streamToPre('/monitor/identify', e.target, 'identifyMonOut');
       });
       </script>
     </body>
