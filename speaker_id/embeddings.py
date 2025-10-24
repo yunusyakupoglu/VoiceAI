@@ -5,12 +5,6 @@ import numpy as np
 
 from .features import compute_mfcc, FeatureConfig
 
-try:
-    from speechbrain.pretrained import EncoderClassifier  # type: ignore
-    _HAS_SPEECHBRAIN = True
-except Exception:
-    _HAS_SPEECHBRAIN = False
-
 
 Backend = Literal["mfcc", "ecapa"]
 
@@ -30,8 +24,12 @@ class EmbeddingExtractor:
     def _ensure_ecapa(self) -> None:
         if self._ecapa is not None:
             return
-        if not _HAS_SPEECHBRAIN:
-            raise RuntimeError("SpeechBrain not installed. Install extras: pip install -r requirements-ecapa.txt")
+        try:
+            from speechbrain.pretrained import EncoderClassifier  # type: ignore
+        except Exception as e:
+            raise RuntimeError(
+                "SpeechBrain not available. Install ECAPA extras (torch, speechbrain)."
+            ) from e
         self._ecapa = EncoderClassifier.from_hparams(source=self.config.ecapa_source)
 
     def extract(self, audio: np.ndarray) -> np.ndarray:
