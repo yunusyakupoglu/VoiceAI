@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+import os
 from .embed import SpeakerEmbedder
 from .store import SpeakerDatabase
 from .audio import record_microphone
@@ -34,7 +35,8 @@ DEFAULT_DB = str(Path.cwd() / "data" / "speakers.json")
 
 
 def get_db(db_path: Optional[str]) -> SpeakerDatabase:
-    path = db_path or DEFAULT_DB
+    env_path = os.getenv("SPEAKERID_DB")
+    path = db_path or env_path or DEFAULT_DB
     os.makedirs(os.path.dirname(path), exist_ok=True)
     return SpeakerDatabase(path=path)
 

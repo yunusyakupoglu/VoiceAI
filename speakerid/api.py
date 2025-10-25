@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 from pathlib import Path
+import os
 from typing import Optional
 
 import numpy as np
@@ -32,7 +33,9 @@ def get_embedder() -> SpeakerEmbedder:
 
 
 def get_db(db_path: Optional[str] = None) -> SpeakerDatabase:
-    path = db_path or DEFAULT_DB
+    # Allow overriding DB path via environment variable SPEAKERID_DB
+    env_path = os.getenv("SPEAKERID_DB")
+    path = db_path or env_path or DEFAULT_DB
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     return SpeakerDatabase(path=path)
 
@@ -273,6 +276,12 @@ async def ws_identify(ws: WebSocket):
     try:
         embedder = get_embedder()
         db = get_db()
+        # Proactively inform client if there are no enrollments yet
+        if not db.list_speakers():
+            await ws.send_text(json.dumps({
+                "type": "error",
+                "message": "no_enrollments",
+            }))
         sr_client: Optional[int] = None
         buffer = np.zeros(0, dtype=np.float32)
         pending = 0  # samples since last emit
@@ -315,15 +324,21 @@ async def ws_identify(ws: WebSocket):
                     pending = 0
                     window = buffer[-samples_window:]
                     try:
-                        window_16k = resample_waveform(window, sr_client, 16000)
-                        result = embedder.compute_embedding_from_waveform(window_16k)
-                        name, score, ranked = db.identify(result.embedding, threshold=0.6, top_k=3)
-                        await ws.send_text(json.dumps({
-                            "type": "result",
-                            "best": name,
-                            "score": float(score),
-                            "top": [(n, float(s)) for (n, s) in ranked],
-                        }))
+                        if not db.list_speakers():
+                            await ws.send_text(json.dumps({
+                                "type": "error",
+                                "message": "no_enrollments",
+                            }))
+                        else:
+                            window_16k = resample_waveform(window, sr_client, 16000)
+                            result = embedder.compute_embedding_from_waveform(window_16k)
+                            name, score, ranked = db.identify(result.embedding, threshold=0.6, top_k=3)
+                            await ws.send_text(json.dumps({
+                                "type": "result",
+                                "best": name,
+                                "score": float(score),
+                                "top": [(n, float(s)) for (n, s) in ranked],
+                            }))
                     except Exception as e:
                         await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
 
