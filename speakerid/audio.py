@@ -94,3 +94,16 @@ def record_microphone(
     # Ensure contiguous float32
     waveform = np.ascontiguousarray(waveform.astype(np.float32))
     return waveform, sample_rate
+
+
+def resample_waveform(waveform: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
+    """Resample a 1D waveform from orig_sr to target_sr using librosa."""
+    if orig_sr == target_sr:
+        return np.ascontiguousarray(waveform.astype(np.float32))
+    if librosa is None:
+        raise RuntimeError(
+            "librosa is required to resample audio. Please install dependencies via requirements.txt"
+        )
+    y = waveform.astype(np.float32)
+    y_rs = librosa.resample(y, orig_sr=orig_sr, target_sr=target_sr)
+    return np.ascontiguousarray(y_rs.astype(np.float32))

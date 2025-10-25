@@ -14,3 +14,8 @@ rich>=13.7.1
 
 # Live microphone (optional but recommended)
 sounddevice>=0.4.6
+
+# Web API + UI
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9

@@ -6,7 +6,8 @@ Python ile konuşmacı tanıma (kimin konuştuğunu sesten bulma) aracı. Kayıt
 - Örnekleme: 16 kHz, mono
 - Veri deposu: Basit JSON (varsayılan: `data/speakers.json`)
 - CLI: `python -m speakerid` ile komut satırı
- - CLI: `python -m speakerid` ile komut satırı (mikrofon desteği dahil)
+- CLI: `python -m speakerid` ile komut satırı (mikrofon desteği dahil)
+- Web UI/API: FastAPI tabanlı basit arayüz (`uvicorn speakerid.api:app`)
 
 ## Özellikler
 - Kişi kaydetme (enroll) — referans ses(ler) ile kişiyi ekleyin
@@ -95,6 +96,20 @@ python -m speakerid identify-mic --seconds 4 --threshold 0.6 --top-k 3
 İpuçları:
 - Mikrofon sürücüsü/izin sorunları için `arecord -l` (Linux) ya da sistem ayarlarını kontrol edin.
 - Çoklu cihaz varsa `sounddevice` içinde varsayılan cihazı sistemden ayarlayın; gerekirse Python tarafında cihaz indeksi eklenebilir.
+
+## Web UI / API
+
+Sunucu:
+```bash
+uvicorn speakerid.api:app --host 0.0.0.0 --port 8000
+```
+
+Tarayıcıdan `http://localhost:8000/` adresine gidin. Özellikler:
+- Dosyadan kayıt (POST /enroll)
+- Dosyadan tanıma (POST /identify)
+- Canlı tanıma (WS /ws/identify): Tarayıcı mikrofonu ile anlık skorlar
+
+Not: İlk isteklerde model indirileceği için birkaç saniye sürebilir.
 
 ## İpuçları
 - Kalite: Sessiz ortam, 3–10 sn konuşma, farklı örnekler doğruluğu artırır.
