@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import numpy as np
 
 
@@ -54,3 +54,15 @@ class SimpleSpeakerId:
         if best_score < self.threshold:
             return None, best_score, scores
         return best_name, best_score, scores
+
+
+def compute_znorm(scores: Dict[str, float], impostor_means: Dict[str, float], impostor_stds: Dict[str, float]) -> Dict[str, float]:
+    normed: Dict[str, float] = {}
+    for name, s in scores.items():
+        mu = impostor_means.get(name, 0.0)
+        sd = impostor_stds.get(name, 1.0)
+        if sd <= 1e-6:
+            normed[name] = s - mu
+        else:
+            normed[name] = (s - mu) / sd
+    return normed

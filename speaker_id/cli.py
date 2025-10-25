@@ -8,7 +8,7 @@ import numpy as np
 from .audio import load_audio_mono
 from .features import FeatureConfig
 from .storage import Storage
-from .model import SimpleSpeakerId
+from .model import SimpleSpeakerId, compute_znorm
 from .preprocess import preprocess_audio, PreprocessConfig
 from .embeddings import EmbeddingExtractor, EmbeddingConfig
 from .diarize import diarize_embeddings
@@ -82,6 +82,23 @@ def cmd_identify(args: argparse.Namespace) -> int:
 
     model = SimpleSpeakerId(threshold=args.threshold)
     name, score, scores = model.identify(feat, enrollments)
+    if getattr(args, "znorm", False):
+        templates = {n: model.enroll_vector(v) for n, v in enrollments.items()}
+        impostor_means: dict[str, float] = {}
+        impostor_stds: dict[str, float] = {}
+        for n, t in templates.items():
+            others = [templates[k] for k in templates.keys() if k != n]
+            if not others:
+                continue
+            sims = []
+            for o in others:
+                denom = (np.linalg.norm(t) * np.linalg.norm(o)) + 1e-8
+                sims.append(float(np.dot(t, o) / denom))
+            impostor_means[n] = float(np.mean(sims))
+            impostor_stds[n] = float(np.std(sims) + 1e-6)
+        scores = compute_znorm(scores, impostor_means, impostor_stds)
+        if name is not None:
+            score = scores.get(name, score)
 
     if name is None:
         print(f"Unknown speaker (best score={score:.3f}).")
@@ -290,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     pi.add_argument("--threshold", type=float, default=0.55, help="Cosine similarity threshold for unknown")
     pi.add_argument("-v", "--verbose", action="store_true")
     pi.add_argument("--top-k", type=int, default=0, help="Show top-k scores (0 disables)")
+    pi.add_argument("--znorm", action="store_true", help="Apply simple z-norm to scores")
     pi.set_defaults(func=cmd_identify)
 
     # list
