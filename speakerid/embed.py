@@ -52,6 +52,17 @@ class SpeakerEmbedder:
         emb = self._l2_normalize(emb)
         return EmbeddingResult(embedding=emb, model_name=self.model_source)
 
+    @torch.inference_mode()
+    def compute_embedding_from_waveform(self, waveform: np.ndarray) -> EmbeddingResult:
+        """Compute embedding from an in-memory mono waveform in [-1, 1]."""
+        if waveform.ndim != 1:
+            waveform = np.mean(waveform, axis=-1)
+        waveform = normalize_waveform(waveform.astype(np.float32))
+        tensor = torch.from_numpy(waveform).unsqueeze(0).to(self.device)
+        emb = self._classifier.encode_batch(tensor).squeeze(0).squeeze(0).detach().cpu().numpy()
+        emb = self._l2_normalize(emb)
+        return EmbeddingResult(embedding=emb, model_name=self.model_source)
+
     @staticmethod
     def cosine_similarity(vec_a: np.ndarray, vec_b: np.ndarray, eps: float = 1e-9) -> float:
         a = vec_a.astype(np.float32)

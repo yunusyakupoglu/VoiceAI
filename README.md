@@ -6,6 +6,7 @@ Python ile konuşmacı tanıma (kimin konuştuğunu sesten bulma) aracı. Kayıt
 - Örnekleme: 16 kHz, mono
 - Veri deposu: Basit JSON (varsayılan: `data/speakers.json`)
 - CLI: `python -m speakerid` ile komut satırı
+ - CLI: `python -m speakerid` ile komut satırı (mikrofon desteği dahil)
 
 ## Özellikler
 - Kişi kaydetme (enroll) — referans ses(ler) ile kişiyi ekleyin
@@ -30,7 +31,10 @@ pip install -r requirements.txt
 
 Notlar:
 - MP3/OGG desteği için sisteminizde `ffmpeg` bulunması faydalıdır.
-- Linux'ta `libsndfile` gerekebilir: `sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1`
+- Linux'ta `libsndfile` ve mikrofon için PortAudio gerekebilir:
+  ```bash
+  sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1 libportaudio2
+  ```
 
 ## Hızlı Başlangıç
 
@@ -74,6 +78,23 @@ python -m speakerid list
 python -m speakerid remove "Ali"
 python -m speakerid reset  # tüm kayıtları siler
 ```
+
+### 5) Mikrofon ile Kayıt ve Tanıma
+Mikrofon komutları kısa bir kayıt alır (varsayılan 5 sn) ve işlemi yapar.
+
+- Kişi kaydetme (mikrofon):
+```bash
+python -m speakerid enroll-mic "Ali" --seconds 6
+```
+
+- Tanıma (mikrofon):
+```bash
+python -m speakerid identify-mic --seconds 4 --threshold 0.6 --top-k 3
+```
+
+İpuçları:
+- Mikrofon sürücüsü/izin sorunları için `arecord -l` (Linux) ya da sistem ayarlarını kontrol edin.
+- Çoklu cihaz varsa `sounddevice` içinde varsayılan cihazı sistemden ayarlayın; gerekirse Python tarafında cihaz indeksi eklenebilir.
 
 ## İpuçları
 - Kalite: Sessiz ortam, 3–10 sn konuşma, farklı örnekler doğruluğu artırır.

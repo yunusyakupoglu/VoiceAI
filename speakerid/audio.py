@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -11,6 +11,11 @@ try:
 except Exception:  # pragma: no cover - optional dependency handling
     librosa = None  # type: ignore
 
+# Optional: microphone capture
+try:
+    import sounddevice as sd  # type: ignore
+except Exception:  # pragma: no cover - optional dependency handling
+    sd = None  # type: ignore
 
 def load_audio_mono(file_path: str, target_sample_rate: int = 16000) -> Tuple[np.ndarray, int]:
     """
@@ -44,3 +49,48 @@ def normalize_waveform(waveform: np.ndarray, eps: float = 1e-9) -> np.ndarray:
     if norm < eps:
         return waveform
     return waveform / norm
+
+
+def record_microphone(
+    duration_seconds: float = 5.0,
+    sample_rate: int = 16000,
+    channels: int = 1,
+    device: Optional[int | str] = None,
+) -> Tuple[np.ndarray, int]:
+    """
+    Record audio from the default microphone for a fixed duration.
+
+    Returns (waveform, sample_rate), waveform is mono float32 in [-1, 1].
+
+    Requires the optional dependency 'sounddevice'. On Linux, you may need
+    system packages like 'libportaudio2' or 'portaudio19-dev'.
+    """
+    if sd is None:
+        raise RuntimeError(
+            "sounddevice is required for microphone capture. Install it via requirements.txt"
+        )
+
+    if duration_seconds <= 0:
+        raise ValueError("duration_seconds must be > 0")
+    if channels not in (1, 2):
+        raise ValueError("channels must be 1 or 2")
+
+    num_frames = int(sample_rate * duration_seconds)
+    recording = sd.rec(
+        frames=num_frames,
+        samplerate=sample_rate,
+        channels=channels,
+        dtype="float32",
+        device=device,
+    )
+    sd.wait()
+
+    # recording shape: (num_frames, channels)
+    if channels == 1:
+        waveform = recording.reshape(-1)
+    else:
+        waveform = np.mean(recording, axis=1)
+
+    # Ensure contiguous float32
+    waveform = np.ascontiguousarray(waveform.astype(np.float32))
+    return waveform, sample_rate

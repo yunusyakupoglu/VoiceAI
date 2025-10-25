@@ -11,6 +11,7 @@ from rich.table import Table
 
 from .embed import SpeakerEmbedder
 from .store import SpeakerDatabase
+from .audio import record_microphone
 
 app = typer.Typer(add_completion=False, help="""
 Konuşmacı tanıma: Kayıtlı kişileri seslerinden tanımlayın.
@@ -18,6 +19,8 @@ Konuşmacı tanıma: Kayıtlı kişileri seslerinden tanımlayın.
 Komutlar:
 - enroll: Bir kişiyi referans ses ile kaydet
 - identify: Bir ses dosyasındaki konuşmacıyı tanı
+- enroll-mic: Mikrofondan kayıt ile kişi kaydet
+- identify-mic: Mikrofondan konuşmacıyı tanı
 - list: Kayıtlı kişileri listele
 - remove: Bir kişiyi veritabanından sil
 - verify: İki sesin aynı kişiye ait olup olmadığını ölç
@@ -138,3 +141,56 @@ def reset(
 
 def main() -> None:  # for setuptools entry_points if needed
     app()
+
+
+# === Live microphone commands ===
+
+@app.command("enroll-mic")
+def enroll_mic(
+    name: str = typer.Argument(..., help="Kişi adı (ör. Ali)"),
+    seconds: float = typer.Option(5.0, "--seconds", help="Kayıt süresi (sn)"),
+    db: Optional[str] = typer.Option(None, "--db", help=f"Veritabanı yolu (varsayılan: {DEFAULT_DB})"),
+    device: Optional[str] = typer.Option(None, "--device", help="PyTorch cihazı (cuda/cpu)"),
+):
+    """Mikrofondan kısa kayıt alıp kişiyi kaydet."""
+    console.print(f"[cyan]{seconds} sn kayıt başlıyor. Konuşun...[/cyan]")
+    waveform, sr = record_microphone(duration_seconds=seconds, sample_rate=16000, channels=1)
+    console.print("[cyan]Kayıt bitti, işleniyor...[/cyan]")
+
+    embedder = SpeakerEmbedder(device=device)
+    result = embedder.compute_embedding_from_waveform(waveform)
+    database = get_db(db)
+    database.enroll(name, result.embedding)
+    console.print(f"[green]Kayıt başarılı:[/green] {name}")
+
+
+@app.command("identify-mic")
+def identify_mic(
+    seconds: float = typer.Option(5.0, "--seconds", help="Kayıt süresi (sn)"),
+    db: Optional[str] = typer.Option(None, "--db", help=f"Veritabanı yolu (varsayılan: {DEFAULT_DB})"),
+    threshold: float = typer.Option(0.6, "--threshold", min=0.0, max=1.0, help="Benzerlik eşiği (0-1)"),
+    top_k: int = typer.Option(3, "--top-k", help="En yakın kaç kişiyi gösterelim?"),
+    device: Optional[str] = typer.Option(None, "--device", help="PyTorch cihazı (cuda/cpu)"),
+):
+    """Mikrofondan kısa kayıt alıp konuşmacıyı tanı."""
+    console.print(f"[cyan]{seconds} sn kayıt başlıyor. Konuşun...[/cyan]")
+    waveform, sr = record_microphone(duration_seconds=seconds, sample_rate=16000, channels=1)
+    console.print("[cyan]Kayıt bitti, işleniyor...[/cyan]")
+
+    embedder = SpeakerEmbedder(device=device)
+    result = embedder.compute_embedding_from_waveform(waveform)
+    database = get_db(db)
+    name, score, ranked = database.identify(result.embedding, threshold=threshold, top_k=top_k)
+
+    table = Table(title="En yakın eşleşmeler")
+    table.add_column("Kişi")
+    table.add_column("Benzerlik", justify="right")
+    for person, s in ranked:
+        table.add_row(person, f"{s:.3f}")
+
+    if name is None:
+        console.print("[yellow]Eşik altında - konuşmacı bilinmiyor.[/yellow]")
+    else:
+        console.print(f"[green]Tahmin:[/green] {name} (skor={score:.3f})")
+
+    console.print(table)
