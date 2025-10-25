@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 import librosa
+from typing import Optional
 
 
 @dataclass
@@ -14,6 +15,10 @@ class PreprocessConfig:
     nr_n_fft: int = 1024
     nr_hop_length: int = 256
     nr_percentile: float = 20.0  # noise floor percentile across time
+    # VAD (WebRTC)
+    use_webrtc_vad: bool = False
+    vad_aggressiveness: int = 2  # 0-3
+    vad_frame_ms: int = 20  # 10, 20, or 30
 
 
 def trim_silence(audio: np.ndarray, sample_rate: int, top_db: float) -> np.ndarray:
@@ -69,9 +74,48 @@ def spectral_gate_denoise(
     return y.astype(np.float32)
 
 
+def apply_webrtc_vad(audio: np.ndarray, sample_rate: int, aggressiveness: int = 2, frame_ms: int = 20) -> np.ndarray:
+    """Keep only voiced frames using WebRTC VAD. Requires 16k mono float32 audio.
+    Returns possibly shorter audio after concatenating voiced frames.
+    """
+    try:
+        import webrtcvad  # type: ignore
+    except Exception:
+        return audio
+    if sample_rate != 16000:
+        # resample for VAD requirements
+        audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000, res_type="kaiser_fast")
+        sample_rate = 16000
+    vad = webrtcvad.Vad(int(aggressiveness))
+    frame_len = int(frame_ms * sample_rate / 1000)
+    if frame_len % 2 == 1:
+        frame_len += 1
+    if frame_len <= 0:
+        return audio
+    # Convert to int16 little-endian as required by webrtcvad
+    pcm16 = np.clip(audio, -1.0, 1.0)
+    pcm16 = (pcm16 * 32767.0).astype(np.int16, copy=False)
+    voiced = []
+    for start in range(0, len(pcm16) - frame_len + 1, frame_len):
+        frame = pcm16[start:start + frame_len]
+        is_voiced = False
+        try:
+            is_voiced = vad.is_speech(frame.tobytes(), sample_rate)
+        except Exception:
+            is_voiced = False
+        if is_voiced:
+            voiced.append(frame)
+    if not voiced:
+        return audio
+    out = np.concatenate(voiced, axis=0).astype(np.float32) / 32768.0
+    return out
+
+
 def preprocess_audio(audio: np.ndarray, config: PreprocessConfig) -> np.ndarray:
     y = audio.astype(np.float32, copy=False)
     y = trim_silence(y, sample_rate=config.sample_rate, top_db=config.trim_top_db)
+    if config.use_webrtc_vad:
+        y = apply_webrtc_vad(y, sample_rate=config.sample_rate, aggressiveness=config.vad_aggressiveness, frame_ms=config.vad_frame_ms)
     if config.noise_reduction:
         y = spectral_gate_denoise(
             y,

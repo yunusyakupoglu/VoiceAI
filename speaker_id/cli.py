@@ -42,6 +42,9 @@ def get_preproc_config(args: argparse.Namespace) -> PreprocessConfig:
         nr_n_fft=args.nr_n_fft,
         nr_hop_length=args.nr_hop_length,
         nr_percentile=args.nr_percentile,
+        use_webrtc_vad=args.vad,
+        vad_aggressiveness=args.vad_aggr,
+        vad_frame_ms=args.vad_frame_ms,
     )
 
 
@@ -269,6 +272,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--nr-n-fft", dest="nr_n_fft", type=int, default=1024)
     p.add_argument("--nr-hop-length", dest="nr_hop_length", type=int, default=256)
     p.add_argument("--nr-percentile", dest="nr_percentile", type=float, default=20.0)
+    p.add_argument("--vad", action="store_true", help="Enable WebRTC VAD (voiced frames only)")
+    p.add_argument("--vad-aggr", dest="vad_aggr", type=int, default=2, help="VAD aggressiveness 0-3")
+    p.add_argument("--vad-frame-ms", dest="vad_frame_ms", type=int, default=20, help="VAD frame ms: 10/20/30")
 
     sub = p.add_subparsers(dest="cmd", required=True)
 
