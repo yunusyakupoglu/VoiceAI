@@ -1,0 +1,2 @@
+torch>=2.3
+speechbrain>=0.5.16
